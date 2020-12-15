@@ -1,3 +1,3 @@
-# Modules 
+# Modules
 
-Modules are using data and putting a view function on them.
+Modules are view functions associated with data.

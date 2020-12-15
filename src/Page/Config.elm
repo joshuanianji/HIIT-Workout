@@ -1,7 +1,6 @@
-module View.Config exposing
-    ( Config
+module Page.Config exposing
+    ( Model
     , Msg
-    , encode
     , getData
     , init
     , subscriptions
@@ -11,11 +10,11 @@ module View.Config exposing
 
 import Browser.Events
 import Colours
-import Data.Config as Data
+import Data.Config as Data exposing (Data)
 import Data.Duration as Duration
 import Data.Flags as Flags exposing (Flags)
-import Data.SharedState as SharedState exposing (SharedState)
-import Dialog
+import Data.PopupCmd as PopupCmd
+import Data.SharedState as SharedState exposing (SharedState, SharedStateUpdate)
 import Dict
 import Element exposing (Element)
 import Element.Background as Background
@@ -24,76 +23,55 @@ import Element.Font as Font
 import Element.Input as Input
 import Element.Lazy as Lazy
 import FeatherIcons as Icon
+import File.Download
 import Html.Attributes
 import Json.Decode
 import Json.Encode
 import Modules.Exercise as Exercise
+import Modules.Popup as Popup
 import Modules.Set as Set
+import Modules.TimeInput as TimeInput
 import Ports
+import Routes exposing (Route)
 import Util
-import View.TimeInput as TimeInput
 
 
 
 ---- TYPE ----
 
 
-type Config
-    = Config Model Data.Data
+type Model
+    = Model AppModel Data
 
 
-type alias Model =
-    { saving : Bool
-    , speechSynthesisPopup : Bool
-    }
+
+-- stuff purely in the app
+
+
+type alias AppModel =
+    { saving : Bool }
 
 
 
 -- INIT AND JSON STUFF
 
 
-init : Flags -> Config
-init flags =
-    let
-        decodeLocalStorageAttempt =
-            Data.decodeLocalStorage flags.storedConfig
-
-        ( data, mErr ) =
-            case decodeLocalStorageAttempt of
-                -- there was no config stored in the first place
-                Ok Nothing ->
-                    ( Data.default, Nothing )
-
-                -- success
-                Ok (Just config) ->
-                    ( Data.fromLocalStorage config, Nothing )
-
-                -- failure to decode
-                Err jsonErr ->
-                    ( Data.default, Just <| Json.Decode.errorToString jsonErr )
-
-        actualData =
-            { data | error = mErr }
-
-        model =
-            { saving = False
-            , speechSynthesisPopup = False
-            }
-    in
-    Config model { actualData | error = mErr }
+init : SharedState -> ( Model, Cmd Msg )
+init ({ configCache } as sharedState) =
+    ( Model
+        { saving = False
+        }
+        configCache
+    , Cmd.none
+    )
 
 
 
 -- Public Helpers
 
 
-encode : Config -> Json.Encode.Value
-encode (Config _ data) =
-    Data.encode data
-
-
-getData : Config -> Data.Data
-getData (Config _ data) =
+getData : Model -> Data.Data
+getData (Model _ data) =
     data
 
 
@@ -101,8 +79,59 @@ getData (Config _ data) =
 ---- VIEW ----
 
 
-view : SharedState -> Config -> Element Msg
-view sharedState (Config model data) =
+view : SharedState -> Model -> Element Msg
+view sharedState (Model model data) =
+    Element.column
+        [ Element.width Element.fill
+        , Element.height Element.fill
+        , Element.spacing 32
+        , Element.paddingXY 0 16
+        ]
+        [ content sharedState (Model model data)
+        , Element.row
+            [ Element.spacing 16
+            , Element.centerX
+            ]
+            [ -- save settings; go to applications as well as save to localhostUtil.viewIcon
+              Util.viewIcon
+                { icon = Icon.check
+                , color = Colours.grass
+                , size = 50
+                , msg = Just <| NavigateTo True Routes.Workout
+                , withBorder = True
+                }
+                |> Util.withTooltip
+                    { position = Util.Top
+                    , content = "Finish editing"
+                    }
+
+            -- download file as JSON
+            , Util.viewIcon
+                { icon = Icon.share
+                , color = Colours.sky
+                , size = 50
+                , msg = Just ExportConfig
+                , withBorder = True
+                }
+                |> Util.withTooltip
+                    { position = Util.Top
+                    , content = "Export Data"
+                    }
+            ]
+        , Element.paragraph
+            [ Font.size 16
+            , Font.center
+            , Font.light
+            , Font.color Colours.lightGray
+            ]
+            [ Element.text "Version "
+            , Element.text sharedState.version
+            ]
+        ]
+
+
+content : SharedState -> Model -> Element Msg
+content sharedState (Model model data) =
     let
         paddingX =
             case sharedState.device.class of
@@ -118,7 +147,6 @@ view sharedState (Config model data) =
         , Element.height Element.fill
         , Element.paddingXY paddingX 32
         , Element.spacing 52
-        , Element.inFront <| speechSynthesisPopup model
         ]
         [ Util.viewIcon
             { icon = Icon.settings
@@ -128,9 +156,6 @@ view sharedState (Config model data) =
             , withBorder = False
             }
             |> Element.el [ Element.centerX ]
-        , data.error
-            |> Maybe.map Element.text
-            |> Maybe.withDefault Element.none
         , durations sharedState.device data
         , viewSounds data
         , viewSets sharedState.device data
@@ -253,7 +278,7 @@ viewSounds data =
                 { icon = Icon.helpCircle
                 , color = Colours.black
                 , size = 20
-                , msg = Just SpeechSynthesisToggle
+                , msg = Just OpenSpeechSynthesis
                 , withBorder = False
                 }
                 |> Element.el
@@ -396,7 +421,7 @@ viewSets device data =
 -- the popup when the user clicks the (?) on the speech synthesis toggle
 
 
-speechSynthesisPopup : Model -> Element Msg
+speechSynthesisPopup : AppModel -> Popup.Config Msg
 speechSynthesisPopup model =
     let
         body =
@@ -425,42 +450,32 @@ speechSynthesisPopup model =
                 { icon = Icon.x
                 , color = Colours.sunset
                 , size = 30
-                , msg = Just SpeechSynthesisToggle
+                , msg = Just ClosePopup
                 , withBorder = True
                 }
                 |> Element.el
                     [ Element.centerX ]
-
-        config =
-            { closeMessage = Nothing
-            , maskAttributes = [ Background.color Colours.transparent ]
-            , containerAttributes =
-                [ Element.spacing 32
-                , Element.centerX
-                , Element.centerY
-                , Element.width (Element.maximum 600 Element.fill)
-                , Element.padding 32
-                , Background.color Colours.white
-                , Border.width 1
-                , Border.color Colours.sky
-                , Border.rounded 8
-                ]
-            , headerAttributes = []
-            , bodyAttributes = [ Element.width Element.fill ]
-            , footerAttributes = [ Element.width Element.fill ]
-            , header = Nothing
-            , body = Just body
-            , footer = Just closeButton
-            }
-
-        dialogConfig =
-            if model.speechSynthesisPopup then
-                Just config
-
-            else
-                Nothing
     in
-    Dialog.view dialogConfig
+    { closeMessage = Nothing
+    , maskAttributes = [ Background.color Colours.transparent ]
+    , containerAttributes =
+        [ Element.spacing 32
+        , Element.centerX
+        , Element.centerY
+        , Element.width (Element.maximum 600 Element.fill)
+        , Element.padding 32
+        , Background.color Colours.white
+        , Border.width 1
+        , Border.color Colours.sky
+        , Border.rounded 8
+        ]
+    , headerAttributes = []
+    , bodyAttributes = [ Element.width Element.fill ]
+    , footerAttributes = [ Element.width Element.fill ]
+    , header = Nothing
+    , body = Just body
+    , footer = Just closeButton
+    }
 
 
 
@@ -509,7 +524,9 @@ checkbox data =
 
 
 type Msg
-    = UpdateTimeInput Input TimeInput.Msg
+    = NavigateTo Bool Route -- bool is whether or not we should start the always on screen
+    | ClosePopup
+    | UpdateTimeInput Input TimeInput.Msg
     | ToggleCheckbox Checkbox Bool
     | NewElement Int
     | DeleteElement Int Int
@@ -521,9 +538,10 @@ type Msg
     | ToggleSetExpand Int
     | UpdateSetName Int String
     | UpdateExerciseName Int Int String
-    | SpeechSynthesisToggle -- opens and closes info popup
+    | OpenSpeechSynthesis
     | ToLocalStorage -- save to local storage
     | StoreConfigSuccess -- when local storage succeeds
+    | ExportConfig
 
 
 
@@ -543,20 +561,36 @@ type Checkbox
     | SoundsCbx
 
 
-update : Msg -> Config -> ( Config, Cmd Msg )
-update msg (Config model data) =
+update : SharedState -> Msg -> Model -> ( Model, Cmd Msg, SharedStateUpdate Msg )
+update sharedState msg (Model model data) =
     case msg of
+        NavigateTo alwaysOn route ->
+            ( Model model data
+            , Cmd.batch
+                [ SharedState.navigateTo route sharedState
+                , if alwaysOn then
+                    Ports.workoutStatus "start"
+
+                  else
+                    Cmd.none
+                ]
+            , SharedState.NoUpdate
+            )
+
+        ClosePopup ->
+            ( Model model data, Cmd.none, SharedState.PopupCmd PopupCmd.remove )
+
         UpdateTimeInput ExerciseIpt timeInputMsg ->
             let
                 ( newInput, save ) =
                     TimeInput.update timeInputMsg data.exerciseInput
             in
-            Config model { data | exerciseInput = newInput }
+            Model model { data | exerciseInput = newInput }
                 |> (if save then
-                        saveToLocalStorage
+                        saveToLocalStorage sharedState
 
                     else
-                        \c -> ( c, Cmd.none )
+                        \c -> ( c, Cmd.none, SharedState.NoUpdate )
                    )
 
         UpdateTimeInput BreakIpt timeInputMsg ->
@@ -564,12 +598,12 @@ update msg (Config model data) =
                 ( newInput, save ) =
                     TimeInput.update timeInputMsg data.breakInput
             in
-            Config model { data | breakInput = newInput }
+            Model model { data | breakInput = newInput }
                 |> (if save then
-                        saveToLocalStorage
+                        saveToLocalStorage sharedState
 
                     else
-                        \c -> ( c, Cmd.none )
+                        \c -> ( c, Cmd.none, SharedState.NoUpdate )
                    )
 
         UpdateTimeInput SetBreakIpt timeInputMsg ->
@@ -577,12 +611,12 @@ update msg (Config model data) =
                 ( newInput, save ) =
                     TimeInput.update timeInputMsg data.setBreakInput
             in
-            Config model { data | setBreakInput = newInput }
+            Model model { data | setBreakInput = newInput }
                 |> (if save then
-                        saveToLocalStorage
+                        saveToLocalStorage sharedState
 
                     else
-                        \c -> ( c, Cmd.none )
+                        \c -> ( c, Cmd.none, SharedState.NoUpdate )
                    )
 
         UpdateTimeInput CountdownIpt timeInputMsg ->
@@ -590,63 +624,64 @@ update msg (Config model data) =
                 ( newInput, save ) =
                     TimeInput.update timeInputMsg data.countdownInput
             in
-            Config model { data | countdownInput = newInput }
+            Model model { data | countdownInput = newInput }
                 |> (if save then
-                        saveToLocalStorage
+                        saveToLocalStorage sharedState
 
                     else
-                        \c -> ( c, Cmd.none )
+                        \c -> ( c, Cmd.none, SharedState.NoUpdate )
                    )
 
         ToggleCheckbox CountdownCbx bool ->
-            Config model { data | countdown = bool }
-                |> saveToLocalStorage
+            Model model { data | countdown = bool }
+                |> saveToLocalStorage sharedState
 
         ToggleCheckbox SpeakCbx bool ->
-            Config model { data | speak = bool }
-                |> saveToLocalStorage
+            Model model { data | speak = bool }
+                |> saveToLocalStorage sharedState
 
         ToggleCheckbox SoundsCbx bool ->
-            Config model { data | sounds = bool }
-                |> saveToLocalStorage
+            Model model { data | sounds = bool }
+                |> saveToLocalStorage sharedState
 
         NewElement setPos ->
-            Config model (updateSetDictionary data setPos Set.newExercise)
-                |> saveToLocalStorage
+            Model model (updateSetDictionary data setPos Set.newExercise)
+                |> saveToLocalStorage sharedState
 
         DeleteElement setPos elemPos ->
-            Config model (updateSetDictionary data setPos (Set.deleteExercise elemPos >> Set.sanitizeExercises))
-                |> saveToLocalStorage
+            Model model (updateSetDictionary data setPos (Set.deleteExercise elemPos >> Set.sanitizeExercises))
+                |> saveToLocalStorage sharedState
 
         NewSetRepeat setPos repeat ->
-            ( Config model (updateSetDictionary data setPos <| Set.updateRepeatInput repeat)
+            ( Model model (updateSetDictionary data setPos <| Set.updateRepeatInput repeat)
             , Cmd.none
+            , SharedState.NoUpdate
             )
 
         SanitizeRepeat setPos ->
-            Config model (updateSetDictionary data setPos Set.sanitizeRepeat)
-                |> saveToLocalStorage
+            Model model (updateSetDictionary data setPos Set.sanitizeRepeat)
+                |> saveToLocalStorage sharedState
 
         DeleteSet setPos ->
-            Config model (Data.sanitizeSets { data | sets = Dict.remove setPos data.sets })
-                |> saveToLocalStorage
+            Model model (Data.sanitizeSets { data | sets = Dict.remove setPos data.sets })
+                |> saveToLocalStorage sharedState
 
         AddSet ->
             let
                 newN =
                     data.setCounter + 1
             in
-            Config model
+            Model model
                 { data
                     | sets = Dict.insert newN (Set.init newN) data.sets
                     , setCounter = newN
                 }
-                |> saveToLocalStorage
+                |> saveToLocalStorage sharedState
 
         CopySet setPos ->
             case Dict.get setPos data.sets of
                 Nothing ->
-                    ( Config model data, Cmd.none )
+                    ( Model model data, Cmd.none, SharedState.NoUpdate )
 
                 Just setToCopy ->
                     let
@@ -663,32 +698,42 @@ update msg (Config model data) =
                                     )
                                 |> Dict.fromList
                     in
-                    Config model
+                    Model model
                         { data
                             | sets = Dict.insert (setPos + 1) (Set.updatePosition (setPos + 1) setToCopy) newSets
                             , setCounter = Dict.size data.sets + 1
                         }
-                        |> saveToLocalStorage
+                        |> saveToLocalStorage sharedState
 
         ToggleSetExpand setPos ->
-            ( Config model (updateSetDictionary data setPos Set.toggleExpand), Cmd.none )
+            ( Model model (updateSetDictionary data setPos Set.toggleExpand), Cmd.none, SharedState.NoUpdate )
 
         UpdateSetName setPos newName ->
-            Config model (updateSetDictionary data setPos <| Set.updateName newName)
-                |> saveToLocalStorage
+            Model model (updateSetDictionary data setPos <| Set.updateName newName)
+                |> saveToLocalStorage sharedState
 
         UpdateExerciseName setPos exercisePos newName ->
-            Config model (updateSetDictionary data setPos <| Set.updateExerciseName exercisePos newName)
-                |> saveToLocalStorage
+            Model model (updateSetDictionary data setPos <| Set.updateExerciseName exercisePos newName)
+                |> saveToLocalStorage sharedState
 
-        SpeechSynthesisToggle ->
-            ( Config { model | speechSynthesisPopup = not model.speechSynthesisPopup } data, Cmd.none )
+        OpenSpeechSynthesis ->
+            ( Model model data, Cmd.none, SharedState.PopupCmd <| PopupCmd.show (speechSynthesisPopup model) )
 
         ToLocalStorage ->
-            ( Config { model | saving = True } data, Ports.storeConfig (Data.encode data) )
+            ( Model { model | saving = True } data, Ports.storeConfig (Data.encode data), SharedState.NoUpdate )
 
         StoreConfigSuccess ->
-            ( Config { model | saving = False } data, Cmd.none )
+            -- update config whenever we successfully store config
+            ( Model { model | saving = False } data, Cmd.none, SharedState.UpdateConfigCache data )
+
+        ExportConfig ->
+            ( Model model data
+            , Data.encode data
+                -- prettify the JSON file
+                |> Json.Encode.encode 4
+                |> File.Download.string "workout.json" "application/json"
+            , SharedState.NoUpdate
+            )
 
 
 
@@ -706,15 +751,15 @@ updateSetDictionary data setPos f =
     }
 
 
-saveToLocalStorage : Config -> ( Config, Cmd Msg )
-saveToLocalStorage config =
-    update ToLocalStorage config
+saveToLocalStorage : SharedState -> Model -> ( Model, Cmd Msg, SharedStateUpdate Msg )
+saveToLocalStorage sharedState model =
+    update sharedState ToLocalStorage model
 
 
 
 ---- SUBSCRIPTIONS ----
 
 
-subscriptions : Config -> Sub Msg
-subscriptions (Config model _) =
+subscriptions : Model -> Sub Msg
+subscriptions (Model model _) =
     Ports.storeConfigSuccess <| always StoreConfigSuccess

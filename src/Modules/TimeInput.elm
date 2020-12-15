@@ -1,4 +1,4 @@
-module View.TimeInput exposing (Msg, TimeInput, getDuration, init, update, view)
+module Modules.TimeInput exposing (Msg, TimeInput, getDuration, init, update, view)
 
 import Colours
 import Data.Duration as Duration exposing (Duration)

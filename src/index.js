@@ -2,6 +2,7 @@
 import './assets/main.css';
 import './assets/howler.core';
 import './assets/simptip.min.css';
+import WakeLock from './assets/WakeLock';
 
 // images and files
 import smh from './assets/img/smh.png';
@@ -16,8 +17,8 @@ import { Elm } from './Main.elm';
 import * as serviceWorker from './serviceWorker';
 
 // for the window to s p e a k
-var synth = window.speechSynthesis;
-
+let synth = window.speechSynthesis;
+let wakeLock = new WakeLock();
 
 // iOS "Add to home screen" popup
 // Detects if device is on iOS 
@@ -29,11 +30,8 @@ const isIos = () => {
 
 // Detects if device is in standalone mode
 const isInStandaloneMode = () => ('standalone' in window.navigator) && (window.navigator.standalone);
-let showIosInstall = false;
 // Checks if should display install popup notification:
-if (isIos() && !isInStandaloneMode()) {
-    showIosInstall = true
-}
+let showIosInstall = isIos() && !isInStandaloneMode();
 
 
 // init sounds
@@ -56,6 +54,11 @@ const tick = new Howl({
 var storedConfig = localStorage.getItem('config');
 console.log("Retrieved state: ", storedConfig);
 
+// somehow using `process.env.npm_package_version doesn't work
+const VERSION = process.env.ELM_APP_PRODUCT_VERSION || null;
+console.log('version:', VERSION);
+
+
 var app = Elm.Main.init({
     node: document.getElementById('elm'),
     flags: {
@@ -68,7 +71,8 @@ var app = Elm.Main.init({
         images: {
             smhSrc: smh,
             iosShareIconSrc: iosShareIcon
-        }
+        },
+        version: VERSION
     }
 });
 
@@ -80,16 +84,30 @@ app.ports.storeConfig.subscribe(config => {
     setTimeout(() => app.ports.storeConfigSuccess.send(null), 250);
 });
 
-app.ports.playWhistle.subscribe(() => {
-    whistle.play()
+
+app.ports.playSound.subscribe(sound => {
+    switch (sound) {
+        case 'whistle':
+            whistle.play();
+            break;
+        case 'tada':
+            tada.play();
+            break;
+        case 'tick':
+            tick.play();
+            break;
+    }
 });
 
-app.ports.playTada.subscribe(() => {
-    tada.play()
-});
-
-app.ports.playTick.subscribe(() => {
-    tick.play()
+app.ports.workoutStatus.subscribe(status => {
+    switch (status) {
+        case 'start':
+            wakeLock.start();
+            break;
+        case 'end':
+            wakeLock.end();
+            break;
+    }
 });
 
 app.ports.speak.subscribe(value => {
@@ -106,4 +124,4 @@ app.ports.speak.subscribe(value => {
 // If you want your app to work offline and load faster, you can change
 // unregister() to register() below. Note this comes with some pitfalls.
 // Learn more about service workers: https://bit.ly/CRA-PWA
-serviceWorker.register();
+serviceWorker.unregister();

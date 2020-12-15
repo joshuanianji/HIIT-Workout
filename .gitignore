@@ -1,11 +1,10 @@
 # elm stuff
 
 elm-stuff/
-elm.js
 build/
-elmapp.config.js
+elm-analyse.json
 
 # other stuff 
 .DS_Store
-elm-analyse.json
+node_modules/
 hiit-timer-release-workflow.code-workspace

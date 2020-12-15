@@ -1,101 +1,116 @@
 /* hides scrollbar pog */
-html::-webkit-scrollbar{
-    display: none;
+*::-webkit-scrollbar {
+  display: none;
 }
 .no-select {
-    -webkit-touch-callout: none; /* iOS Safari */
-      -webkit-user-select: none; /* Safari */
-       -khtml-user-select: none; /* Konqueror HTML */
-         -moz-user-select: none; /* Old versions of Firefox */
-          -ms-user-select: none; /* Internet Explorer/Edge */
-              user-select: none; /* Non-prefixed version, currently
+  -webkit-touch-callout: none; /* iOS Safari */
+  -webkit-user-select: none; /* Safari */
+  -khtml-user-select: none; /* Konqueror HTML */
+  -moz-user-select: none; /* Old versions of Firefox */
+  -ms-user-select: none; /* Internet Explorer/Edge */
+  user-select: none; /* Non-prefixed version, currently
                                     supported by Chrome, Edge, Opera and Firefox */
 }
 
 .no-cursor {
-    caret-color: transparent;
+  caret-color: transparent;
 }
 /* hide arrows in number selection */
 /* Chrome, Safari, Edge, Opera */
 input::-webkit-outer-spin-button,
 input::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 /* Firefox */
-input[type=number] {
+input[type="number"] {
   -moz-appearance: textfield;
 }
 
 .duration-input {
-    direction: rtl;
-    border-style: none;
-    padding: 8px;
-    text-align: right;
-    font-size : 24px;
-    font-family: 'Lato', sans-serif;
+  direction: rtl;
+  border-style: none;
+  padding: 8px;
+  text-align: right;
+  font-size: 24px;
+  font-family: "Lato", sans-serif;
 }
 
 /* ree */
 .blinking {
+  animation: 1s blinker steps(1) infinite;
+  -webkit-animation: 1s blinker steps(1) infinite;
+  -moz-animation: 1s blinker steps(1) infinite;
 
-    animation:1s blinker steps(1) infinite;
-    -webkit-animation:1s blinker steps(1) infinite;
-    -moz-animation:1s blinker steps(1) infinite;
-
-     color: red;
+  color: red;
 }
 
-@-moz-keyframes blinker {  
-     0% { opacity: 1.0; }
-     50% { opacity: 0.0; }
-     100% { opacity: 1.0; }
+@-moz-keyframes blinker {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
-@-webkit-keyframes blinker {  
-     0% { opacity: 1.0; }
-     50% { opacity: 0.0; }
-     100% { opacity: 1.0; }
+@-webkit-keyframes blinker {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
-@keyframes blinker {  
-     0% { opacity: 1.0; }
-     50% { opacity: 0.0; }
-     100% { opacity: 1.0; }
+@keyframes blinker {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
 }
-
 
 /* github logo */
 
 .github-corner:hover .octo-arm {
-    animation: octocat-wave 560ms ease-in-out
+  animation: octocat-wave 560ms ease-in-out;
 }
 
 @keyframes octocat-wave {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
 
-    0%,
-    100% {
-        transform: rotate(0)
-    }
+  20%,
+  60% {
+    transform: rotate(-25deg);
+  }
 
-    20%,
-    60% {
-        transform: rotate(-25deg)
-    }
-
-    40%,
-    80% {
-        transform: rotate(10deg)
-    }
+  40%,
+  80% {
+    transform: rotate(10deg);
+  }
 }
 
-@media (max-width:500px) {
-    .github-corner:hover .octo-arm {
-        animation: none
-    }
+@media (max-width: 500px) {
+  .github-corner:hover .octo-arm {
+    animation: none;
+  }
 
-    .github-corner .octo-arm {
-        animation: octocat-wave 560ms ease-in-out
-    }
+  .github-corner .octo-arm {
+    animation: octocat-wave 560ms ease-in-out;
+  }
 }

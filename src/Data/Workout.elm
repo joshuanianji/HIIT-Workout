@@ -1,4 +1,4 @@
-module Data.Application exposing
+module Data.Workout exposing
     ( AppState(..)
     , Data
     , WorkoutData
@@ -6,14 +6,16 @@ module Data.Application exposing
     , fromConfig
     )
 
+-- big enough file to host on it's own (or is it??)
+
 import Data.Config as Config
 import Data.Duration as Duration exposing (Duration)
 import Data.TimeBlock as TimeBlock exposing (TimeBlock)
 import Dict
 import List.Nonempty exposing (Nonempty(..))
 import Modules.Set as Set
+import Modules.TimeInput as TimeInput
 import Set
-import View.TimeInput as TimeInput
 
 
 

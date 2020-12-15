@@ -1,23 +1,30 @@
 module Main exposing (main)
 
-import Browser
+import Browser exposing (UrlRequest(..))
 import Browser.Events
+import Browser.Navigation as Nav
 import Colours
+import Data.Config
 import Data.Flags as Flags exposing (Flags, WindowSize)
-import Data.SharedState as SharedState exposing (SharedState)
-import Element exposing (Element)
+import Data.PopupCmd as PopupCmd
+import Data.SharedState as SharedState exposing (SharedState, SharedStateUpdate)
+import Element exposing (Element, scrollbarY)
 import Element.Background as Background
 import Element.Border as Border
 import Element.Font as Font
 import FeatherIcons as Icon
+import File.Download
 import GithubLogo
 import Html exposing (Html)
 import Http
-import Util
-import View.Application as Application exposing (Application)
-import View.Config as Config exposing (Config)
-import File.Download 
 import Json.Encode
+import Modules.Popup as Popup
+import Page.Config as Config
+import Page.NotFound as NotFound
+import Page.Workout as Workout
+import Routes exposing (Route)
+import Url exposing (Url)
+import Util
 
 
 
@@ -26,11 +33,13 @@ import Json.Encode
 
 main : Program Flags Model Msg
 main =
-    Browser.element
-        { init = init
-        , view = view
+    Browser.application
+        { view = viewApplication
+        , init = init
         , update = update
         , subscriptions = subscriptions
+        , onUrlRequest = ClickedLink
+        , onUrlChange = ChangedUrl
         }
 
 
@@ -40,49 +49,46 @@ main =
 
 type alias Model =
     { sharedState : SharedState
-    , state : State
-
-    -- internal configuration data
-    , config : Config
-
-    -- internal application data
-    , application : Application
+    , route : Route
 
     -- popup letting them know that you can install it as a native app
     , showIosInstall : Bool
     , iosShareIcon : String
+    , popup : Maybe (Popup.Config Msg)
 
     -- when the local storage is saved, show the checkmark for 2 seconds
     , showSavedCheck : Bool
+    , page : Page
     }
 
 
-type State
-    = Settings
-    | Application
+type Page
+    = Config Config.Model
+    | Workout Workout.Model
+    | NotFound NotFound.Model
 
 
-init : Flags -> ( Model, Cmd Msg )
-init flags =
+init : Flags -> Url -> Nav.Key -> ( Model, Cmd Msg )
+init flags url key =
     let
         sharedState =
-            SharedState.init flags
+            SharedState.init flags key
 
-        config =
-            Config.init flags
+        route =
+            Routes.fromUrl url
+
+        ( page, cmd ) =
+            routeToPage route sharedState
     in
     ( { sharedState = sharedState
-      , state = Settings
-      , config = config
-      , application = Application.init (Config.getData config) flags
+      , route = Routes.fromUrl url
       , showIosInstall = flags.showIosInstall
       , iosShareIcon = flags.images.iosShareIconSrc
+      , popup = Nothing
       , showSavedCheck = False
+      , page = page
       }
-    , Http.get
-        { url = "https://joshuaji.com/projects/hiit-timer/version.txt"
-        , expect = Http.expectString GotVersion
-        }
+    , cmd
     )
 
 
@@ -90,259 +96,144 @@ init flags =
 ---- VIEW ----
 
 
+viewApplication : Model -> Browser.Document Msg
+viewApplication model =
+    { title = Routes.tabTitle model.route
+    , body = [ view model ]
+    }
+
+
 view : Model -> Html Msg
 view model =
     let
-        iosInstallPopup =
-            if model.showIosInstall then
-                let
-                    fontSize =
-                        model.sharedState.windowSize.width
-                            // 24
-                            |> clamp 13 30
-                in
-                Element.row
-                    [ Element.padding 12
-                    , Element.spacing 8
-                    , Font.size fontSize
-                    , Font.light
-                    , Background.color Colours.white
-                    , Border.color Colours.sunflower
-                    , Border.rounded 15
-                    , Border.width 1
-                    , Border.shadow
-                        { offset = ( 0, 0 )
-                        , size = 2
-                        , blur = 4
-                        , color = Colours.withAlpha 0.4 Colours.lightGray
-                        }
-                    ]
-                    [ Element.textColumn
-                        [ Element.width Element.fill
-                        , Element.spacing 4
-                        , Element.paddingXY 8 0
-                        ]
-                        [ Element.paragraph
-                            [ Element.width Element.fill ]
-                            [ Element.text "Install this webapp on your iOS device! " ]
-                        , Element.paragraph
-                            [ Element.width Element.fill ]
-                            [ Element.text "In Safari, tap "
-                            , Element.image
-                                [ Element.height (Element.px fontSize)
-                                , Element.paddingXY 2 0
-                                ]
-                                { src = model.iosShareIcon
-                                , description = "iOS Share button"
-                                }
-                            , Element.text ", then 'Add to the homescreen.'"
-                            ]
-                        ]
-                    , Element.el
-                        [ Element.height Element.fill
-                        , Element.width <| Element.px 1
-                        , Background.color Colours.lightGray
-                        ]
-                        Element.none
-                    , Util.viewIcon
-                        { icon = Icon.x
-                        , color = Colours.sunset
-                        , size = toFloat fontSize * 2
-                        , msg = Just RemoveIosInstallPopup
-                        , withBorder = False
-                        }
-                        |> Element.el
-                            [ Element.width Element.shrink
-                            , Element.centerY
-                            ]
-                    ]
+        pageContent =
+            case model.page of
+                Config subModel ->
+                    Config.view model.sharedState subModel
+                        |> Element.map ConfigMsg
 
-            else
-                Element.none
+                Workout subModel ->
+                    Workout.view model.sharedState subModel
+                        |> Element.map WorkoutMsg
+
+                NotFound subModel ->
+                    NotFound.view model.sharedState subModel
+                        |> Element.map NotFoundMsg
+
+        content =
+            Element.el
+                [ Element.width Element.fill
+                , Element.height <| Element.maximum model.sharedState.windowSize.height Element.fill
+                , Element.scrollbarY
+                ]
+            <|
+                Element.el
+                    [ Element.width Element.fill
+                    , Element.height Element.fill
+                    , Element.paddingXY 0 16
+                    , Element.inFront <| Element.el [ Element.centerX, Element.padding 8 ] (iosInstallPopup model)
+                    ]
+                    pageContent
     in
-    Element.column
+    Element.el
         [ Element.width Element.fill
         , Element.height Element.fill
-        , Element.paddingXY 0 16
-        , Element.inFront <| Element.el [ Element.centerX, Element.padding 8 ] iosInstallPopup
+        , Element.behindContent content
+        , Element.inFront <|
+            Popup.view model.popup
         ]
-        [ case model.state of
-            Settings ->
-                settings model
-
-            Application ->
-                application model
-        ]
+        Element.none
         |> Element.layout
             [ Font.family
                 [ Font.typeface "Lato" ]
-            , let
-                device =
-                    Element.classifyDevice model.sharedState.windowSize
-              in
-              if device.class == Element.Desktop || device.class == Element.BigDesktop then
-                GithubLogo.view
-                    { href = "https://github.com/joshuanianji/HIIT-Timer"
-                    , bgColor = "#000"
-                    , bodyColor = "#fff"
-                    }
-                    |> Element.el
-                        [ Element.alignRight
-                        , Element.alignTop
-                        ]
-                    |> Element.inFront
-
-              else
-                Element.above Element.none
+            , Element.inFront (githubLogo model.sharedState.device)
             ]
 
 
-settings : Model -> Element Msg
-settings model =
-    Element.column
-        [ Element.width Element.fill
-        , Element.height Element.fill
-        , Element.spacing 32
-        , Element.paddingXY 0 16
-        ]
-        [ Config.view model.sharedState model.config
-            |> Element.map ConfigMsg
-
-        , Element.row 
-            [ Element.spacing 16 
-            , Element.centerX
-            ]
-            [ -- save settings; go to applications as well as save to localhostUtil.viewIcon
-              Util.viewIcon
-                { icon = Icon.check
-                , color = Colours.grass
-                , size = 50
-                , msg = Just ToApplication
-                , withBorder = True
-                }
-                |> Util.withTooltip
-                    { position = Util.Top
-                    , content = "Finish editing"
-                    }
-            -- download file as JSON
-            , Util.viewIcon
-                { icon = Icon.share
-                , color = Colours.sky
-                , size = 50
-                , msg = Just ExportConfig
-                , withBorder = True
-                }
-                |> Util.withTooltip
-                    { position = Util.Top
-                    , content = "Export Data"
-                    }
-            ]
-        , Element.paragraph
-            [ Font.size 16
-            , Font.center
+iosInstallPopup : Model -> Element Msg
+iosInstallPopup model =
+    if model.showIosInstall then
+        let
+            fontSize =
+                model.sharedState.windowSize.width
+                    // 24
+                    |> clamp 13 30
+        in
+        Element.row
+            [ Element.padding 12
+            , Element.spacing 8
+            , Font.size fontSize
             , Font.light
-            , Font.color Colours.lightGray
+            , Background.color Colours.white
+            , Border.color Colours.sunflower
+            , Border.rounded 15
+            , Border.width 1
+            , Border.shadow
+                { offset = ( 0, 0 )
+                , size = 2
+                , blur = 4
+                , color = Colours.withAlpha 0.4 Colours.lightGray
+                }
             ]
-            [ Element.text "Version "
-            , Element.text model.sharedState.version
+            [ Element.textColumn
+                [ Element.width Element.fill
+                , Element.spacing 4
+                , Element.paddingXY 8 0
+                ]
+                [ Element.paragraph
+                    [ Element.width Element.fill ]
+                    [ Element.text "Install this webapp on your iOS device! " ]
+                , Element.paragraph
+                    [ Element.width Element.fill ]
+                    [ Element.text "In Safari, tap "
+                    , Element.image
+                        [ Element.height (Element.px fontSize)
+                        , Element.paddingXY 2 0
+                        ]
+                        { src = model.iosShareIcon
+                        , description = "iOS Share button"
+                        }
+                    , Element.text ", then 'Add to the homescreen.'"
+                    ]
+                ]
+            , Element.el
+                [ Element.height Element.fill
+                , Element.width <| Element.px 1
+                , Background.color Colours.lightGray
+                ]
+                Element.none
+            , Util.viewIcon
+                { icon = Icon.x
+                , color = Colours.sunset
+                , size = toFloat fontSize * 2
+                , msg = Just RemoveIosInstallPopup
+                , withBorder = False
+                }
+                |> Element.el
+                    [ Element.width Element.shrink
+                    , Element.centerY
+                    ]
             ]
-        ]
-
-
-application : Model -> Element Msg
-application model =
-    let
-        applicationView =
-            Application.view model.sharedState model.application
-                |> Element.map ApplicationMsg
-
-        phoneView =
-            Element.column
-                [ Element.width Element.fill
-                , Element.height Element.fill
-                ]
-                [ -- "nav bar"
-                  Element.row
-                    [ Element.width Element.fill
-                    , Element.padding 8
-                    , Element.inFront <|
-                        Element.el
-                            [ Element.alignRight
-                            , Element.padding 16
-                            ]
-                        <|
-                            Util.viewIcon
-                                { icon = Icon.x
-                                , color = Colours.sunset
-                                , size = 30
-                                , msg = Just ToSettings
-                                , withBorder = False
-                                }
-                    ]
-                    [ Element.el [ Element.centerX ] <|
-                        Util.viewIcon
-                            { icon = Icon.zap
-                            , color = Colours.sunset
-                            , size = 45
-                            , msg = Nothing
-                            , withBorder = False
-                            }
-                    ]
-                , applicationView
-                ]
-
-        desktopView =
-            Element.column
-                [ Element.width Element.fill
-                , Element.height Element.fill
-                , Element.padding 16
-                ]
-                [ -- zap icon at the top
-                  Util.viewIcon
-                    { icon = Icon.zap
-                    , color = Colours.sunset
-                    , size = 50
-                    , msg = Nothing
-                    , withBorder = False
-                    }
-                    |> Element.el [ Element.centerX ]
-                , applicationView
-                , if Application.exercising model.application then
-                    Util.viewIcon
-                        { icon = Icon.x
-                        , color = Colours.sunset
-                        , size = 40
-                        , msg = Just ToSettings
-                        , withBorder = True
-                        }
-                        |> Util.withTooltip
-                            { position = Util.Top
-                            , content = "Exit the workout"
-                            }
-                        |> Element.el
-                            [ Element.centerX
-                            , Element.alignBottom
-                            ]
-
-                  else
-                    Util.viewIcon
-                        { icon = Icon.settings
-                        , color = Colours.sky
-                        , size = 40
-                        , msg = Just ToSettings
-                        , withBorder = True
-                        }
-                        |> Element.el
-                            [ Element.centerX
-                            , Element.alignBottom
-                            ]
-                ]
-    in
-    if Util.isVerticalPhone (Element.classifyDevice model.sharedState.windowSize) then
-        phoneView
 
     else
-        desktopView
+        Element.none
+
+
+githubLogo : Element.Device -> Element Msg
+githubLogo device =
+    if device.class == Element.Desktop || device.class == Element.BigDesktop then
+        GithubLogo.view
+            { href = "https://github.com/joshuanianji/HIIT-Timer"
+            , bgColor = "#000"
+            , bodyColor = "#fff"
+            }
+            |> Element.el
+                [ Element.alignRight
+                , Element.alignTop
+                ]
+
+    else
+        Element.none
 
 
 
@@ -350,14 +241,13 @@ application model =
 
 
 type Msg
-    = GotVersion (Result Http.Error String)
+    = ChangedUrl Url
+    | ClickedLink UrlRequest
     | NewWindowSize Int Int
     | RemoveIosInstallPopup -- ios user clicks the 'x'
     | ConfigMsg Config.Msg
-    | ApplicationMsg Application.Msg
-    | ToApplication
-    | ToSettings -- navigate to settings
-    | ExportConfig 
+    | WorkoutMsg Workout.Msg
+    | NotFoundMsg NotFound.Msg
 
 
 
@@ -366,76 +256,119 @@ type Msg
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case msg of
-        GotVersion result ->
-            ( { model | sharedState = SharedState.update (SharedState.GotVersion result) model.sharedState }
-            , Cmd.none
+    case ( model.page, msg ) of
+        ( _, ClickedLink urlRequest ) ->
+            case urlRequest of
+                Internal url ->
+                    ( model, Nav.pushUrl model.sharedState.key <| Url.toString url )
+
+                External url ->
+                    ( model, Nav.load url )
+
+        ( _, ChangedUrl url ) ->
+            let
+                route =
+                    Routes.fromUrl url
+
+                ( page, pageCmd ) =
+                    routeToPage route model.sharedState
+            in
+            ( { model
+                | page = page
+                , route = route
+              }
+            , pageCmd
             )
 
-        NewWindowSize width height ->
+        ( _, NewWindowSize width height ) ->
             ( { model | sharedState = SharedState.update (SharedState.NewWindowSize width height) model.sharedState }
             , Cmd.none
             )
 
-        RemoveIosInstallPopup ->
+        ( _, RemoveIosInstallPopup ) ->
             ( { model | showIosInstall = False }
             , Cmd.none
             )
 
-        ConfigMsg configMsg ->
-            let
-                ( newConfig, configCmd ) =
-                    Config.update configMsg model.config
-            in
-            ( { model | config = newConfig }, Cmd.map ConfigMsg configCmd )
+        ( Config subModel, ConfigMsg subMsg ) ->
+            Config.update model.sharedState subMsg subModel
+                |> updateWith Config ConfigMsg model
 
-        ApplicationMsg applicationMsg ->
-            let
-                ( newApp, appCmd ) =
-                    Application.update applicationMsg model.application
-            in
-            ( { model | application = newApp }, Cmd.map ApplicationMsg appCmd )
+        ( Workout subModel, WorkoutMsg subMsg ) ->
+            Workout.update model.sharedState subMsg subModel
+                |> updateWith Workout WorkoutMsg model
 
-        ToApplication ->
-            ( { model
-                | state = Application
-                , application = Application.updateData (Config.getData model.config) model.application
-              }
-            , Cmd.none
-            )
+        ( NotFound subModel, NotFoundMsg subMsg ) ->
+            NotFound.update model.sharedState subMsg subModel
+                |> updateWith NotFound NotFoundMsg model
 
-        ToSettings ->
-            ( { model
-                | state = Settings
-                , application = Application.endWorkout model.application
-              }
-            , Cmd.none
-            )
-        
-        ExportConfig ->
-            ( model
-            , Config.encode model.config
-                |> Json.Encode.encode 4 -- prettify the JSON file
-                |> File.Download.string "workout.json" "application/json" 
-            )
+        ( _, _ ) ->
+            ( model, Cmd.none )
 
 
+updateWith :
+    (subModel -> Page)
+    -> (subMsg -> Msg)
+    -> Model
+    -> ( subModel, Cmd subMsg, SharedStateUpdate subMsg )
+    -> ( Model, Cmd Msg )
+updateWith toPage toMsg model ( subModel, subMsg, ssUpdate ) =
+    let
+        ( newModel, newCmd ) =
+            case ssUpdate of
+                SharedState.PopupCmd popupCmd ->
+                    ( { model | popup = PopupCmd.getPopup <| PopupCmd.map toMsg popupCmd }
+                    , Cmd.none
+                    )
 
--- helper functions for random crap
+                _ ->
+                    ( model, Cmd.none )
+    in
+    ( { newModel
+        | page = toPage subModel
+        , sharedState = SharedState.update ssUpdate model.sharedState
+      }
+    , Cmd.map toMsg subMsg
+    )
+
+
+routeToPage : Route -> SharedState -> ( Page, Cmd Msg )
+routeToPage route sharedState =
+    case route of
+        Routes.Config ->
+            Config.init sharedState
+                |> initWithPage Config ConfigMsg
+
+        Routes.Workout ->
+            Workout.init sharedState
+                |> initWithPage Workout WorkoutMsg
+
+        Routes.NotFound ->
+            NotFound.init
+                |> initWithPage NotFound NotFoundMsg
+
+
+initWithPage : (subModel -> Page) -> (subMsg -> Msg) -> ( subModel, Cmd subMsg ) -> ( Page, Cmd Msg )
+initWithPage toPage toMsg ( subModel, subMsg ) =
+    ( toPage subModel, Cmd.map toMsg subMsg )
 
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
     let
         specifics =
-            case model.state of
-                Settings ->
-                    Config.subscriptions model.config
+            case model.page of
+                Config subModel ->
+                    Config.subscriptions subModel
                         |> Sub.map ConfigMsg
 
-                Application ->
-                    Application.subscriptions model.application
-                        |> Sub.map ApplicationMsg
+                Workout subModel ->
+                    Workout.subscriptions subModel
+                        |> Sub.map WorkoutMsg
+
+                NotFound subModel ->
+                    NotFound.subscriptions subModel
+                        |> Sub.map NotFoundMsg
 
         newWindowSub =
             if Util.isVerticalPhone model.sharedState.device then

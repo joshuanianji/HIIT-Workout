@@ -1,9 +1,7 @@
 module Data.Config exposing
     ( Data
-    , decodeLocalStorage
-    , default
     , encode
-    , fromLocalStorage
+    , init
     , sanitizeSets
     , totalTime
     )
@@ -18,7 +16,7 @@ import Json.Decode
 import Json.Encode
 import Modules.Exercise as Exercise
 import Modules.Set as Set exposing (Set)
-import View.TimeInput as TimeInput exposing (TimeInput)
+import Modules.TimeInput as TimeInput exposing (TimeInput)
 
 
 type alias Data =
@@ -31,12 +29,32 @@ type alias Data =
 
     -- so we won't get duplicate set positions - the set counter NEVER decreases
     , setCounter : Int
-    , error : Maybe String
 
     -- config for sounds
     , speak : Bool
     , sounds : Bool
     }
+
+
+
+-- with maybe error.
+-- TODO: return a custom error type
+
+
+init : Json.Encode.Value -> ( Data, Maybe String )
+init value =
+    case decodeLocalStorage value of
+        -- there was no config stored in the first place
+        Ok Nothing ->
+            ( default, Nothing )
+
+        -- success
+        Ok (Just config) ->
+            ( fromLocalStorage config, Nothing )
+
+        -- failure to decode
+        Err jsonErr ->
+            ( default, Just <| Json.Decode.errorToString jsonErr )
 
 
 
@@ -77,7 +95,6 @@ fromLocalStorage lsConfig =
     , countdownInput = TimeInput.init lsConfig.countdownInput
     , sets = Dict.map (always fromLocalStorageSet) lsConfig.sets
     , setCounter = lsConfig.setCounter
-    , error = Nothing
     , speak = lsConfig.speak
     , sounds = lsConfig.sounds
     }
@@ -134,7 +151,6 @@ default =
     , countdownInput = TimeInput.init 5
     , sets = setDict
     , setCounter = 1
-    , error = Nothing
     , speak = False
     , sounds = True
     }
